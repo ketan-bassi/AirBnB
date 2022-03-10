@@ -1,0 +1,367 @@
+---
+title: "DATA 613 Project"
+author: "Ketan Bassi"
+date: "2/12/2022"
+output: pdf_document
+---
+```{r}
+library(ggplot2)
+library(quantmod)
+library(lubridate)
+library(dplyr)
+
+# install.packages(c("httr","jsonlite", "RCurl"))
+library(httr)
+library(jsonlite)
+library (RCurl)
+
+
+downloadRecords <- function(){
+  
+  options(timeout=6000)
+  
+  downloadURL <- "https://public.opendatasoft.com/explore/dataset/airbnb-listings/download/?format=csv&disjunctive.host_verifications=true&disjunctive.amenities=true&disjunctive.features=true&refine.country=United+States&timezone=America/Denver&lang=en&use_labels_for_header=true&csv_separator=,"
+  
+
+  download.file(downloadURL, "airbnb.csv", mode = 'wb') 
+  
+  airbnb_data <- read.csv("airbnb.csv")
+  
+  return(airbnb_data)
+}
+```
+
+## Reading the Data into R
+```{r}
+library(readr)
+library(ggplot2)
+airbnb_listings<-downloadRecords()
+
+```
+
+The project objective was to analyze a Airbnb statistical dataset for a information of host, in order to derive the best possible model with respect to a price of Airbnb. In deriving this model we investigated and confirmed that the modeled data satisfied the 4 assumption requirements of linear regression (linearity, homoscedasticity, normality and independence). If the model failed to meet any of these assumptions the appropriate test statistics to best analyze and interpret the data would be used to justify any required transformations.
+
+The metrics used to evaluate which model best predicts the dependent variables would primarily depend on the adjusted R-squared and Root Mean Square Error (RMSE). It was expected that investigation would include independent variables determined to be the “best predictors” (highest significance) with respect to price of Airbnb. We will also investigate and determine interaction and higher order relationships between significant predictors.
+
+## Modeling Procedure
+
+The modeling procedure proceeded according to the following steps 
+1) Removal of redundant variables to reduce multicollinearity 
+2) Backward regression to further reduce the variable set 
+3) Test of significance for remaining variables 
+4) Diagnostics of the first order model 
+5) Exploration of interaction and higher order terms 
+6) Analysis of potential high leverage and influential data points 
+7) Attempted model augmentation with added categorical variables 
+8) Model validation and outcome prediction 
+
+## Selecting Data that will be used to fit the initial model
+
+```{r}
+
+airbnb.listings.data = airbnb_listings[,c("Host.Response.Rate","Host.Listings.Count","Room.Type",
+"Accommodates","Bathrooms","Beds","Price","Security.Deposit","Cleaning.Fee",
+"Guests.Included","Extra.People", "Minimum.Nights","Review.Scores.Rating")]
+airbnb.listings.data
+```
+## Data Cleaning
+
+## Removing rows with NA
+
+```{r}
+airbnb.data = airbnb.listings.data[complete.cases(airbnb.listings.data), ]
+airbnb.data
+```
+
+## Checking the Data Type of the Columns
+
+```{r}
+sapply(airbnb.data, class)
+```
+## Fitting a linear Addictive model with the Predictor variables
+
+The addictive model will be used to check for multicollinearity amongst the predictor variables. 
+
+```{r}
+
+airbnb.data.fit = lm(Price~., data = airbnb.data)
+summary(airbnb.data.fit)
+```
+## Checking for Multicollinearity
+
+The output of this model indicated that multicollinearity existed between the independent variables based on the large number of independent variables.
+
+A Variance Inflation Factor test was conducted to identify correlation between the independent variables and the strength of any correlation. VIF test for the full model showed infinite VIF scores for all parameters indicating that extreme multicollinearity existed between all parameters. 
+
+To check for multicollinearity amongst the predictor variables a VIF test was carried out. The cutoff value of this set is 5.
+
+```{r}
+library("mctest")
+imcdiag(airbnb.data.fit, method = "VIF")
+```
+From the multicollinearity test conducted above, since none of the VIF exceeds 5, we can conclude that there is no correlation between the predictor variables.
+
+
+## Feature Selection
+
+
+
+For this predictive model building, a backward selection procedure will be used in selecting the best predictors of the response variable. This process will be carried out with a prem of 0.3 Backward elimination and full stepwise regression were used to verify that the above variables were optimal for continued model development.
+
+```{r}
+library(olsrr)
+stepmod = ols_step_backward_p(airbnb.data.fit, prem = 0.3, details=FALSE)
+summary(stepmod$model)
+```
+From the result of the backward selection process, all the varibales are suitable predictors of the price of an airbnb except no of beds. Also, the $R^2_{adj}$ is 0.5643, meaning 56.43% of the variation in the price of an airbnb can be explained by the model.
+
+
+## Refitting the model to exclude no of Beds
+
+From the feature selection carried out above, since no of Beds was not selected as a suitable predictor of the price of an airbnb, we will refit the model, excluding beds.
+
+```{r}
+airbnb.data.fit2 = lm(Price~.-Beds, data = airbnb.data)
+summary(airbnb.data.fit2)
+```
+
+## Testing the hypothesis of the full model
+
+Using the Global F test to confirm that at least one of the independent variable is suitable for predicting the price of an airbnb at significance level 0.05.
+
+
+$H_{0} : \beta_{1} = \beta_{2} = .. = \beta_{p} = 0$\
+$H_{a}$ : at least one of $\beta_{i}$ in not zero (i= 1,2,..p)\
+
+```{r}
+summary(airbnb.data.fit2)
+```
+From the result of the full model F-test conducted above, the F-calc is 4149 and the p-value: 2.2e-16 < 0.05. This indicates that atleast one of the independent predictor variable is not equal to 0, and can be used to predict the price of an airbnb.  
+
+
+## Building an Interaction Model
+
+To test for dependencies/interaction of predictor variables on each other, interaction terms will be added to the model. Finally, only the interaction terms which are statistically significant at $\alpha$ = 0.05, will be kept in the final interaction model. In order to explore improvement of the model, an interaction model was created. Individual coefficient tests were carried out to determine whether any significant interacting terms existed between the model independent variables.
+
+```{r}
+airbnb.data.fit.inter = lm(Price~(.-Beds)^2, data = airbnb.data)
+summary(airbnb.data.fit.inter)
+```
+From the result of fitting interaction terms above, since not all the interaction terms are significant, we will refit the model with only the significant interaction terms.
+
+
+```{r}
+new.airbnb.data.fit.inter = lm(Price~.-Beds + `Host.Response.Rate`*`Host.Listings.Count`+ 
+`Host.Response.Rate`*`Room.Type` + `Host.Response.Rate`*`Guests.Included`+ 
+`Host.Listings.Count`*`Room.Type` + `Host.Listings.Count`*Bathrooms + 
+`Host.Listings.Count`*`Security.Deposit` + `Host.Listings.Count`*`Cleaning.Fee` + 
+`Host.Listings.Count`*`Extra.People` + Accommodates*Bathrooms + Accommodates*`Security.Deposit` + 
+Accommodates*`Cleaning.Fee` + Accommodates*`Guests.Included` + Accommodates*`Extra.People` + 
+Bathrooms*`Security.Deposit` + Bathrooms*`Guests.Included` + Bathrooms*`Extra.People` + 
+Bathrooms*`Review.Scores.Rating` + `Security.Deposit`*`Minimum.Nights` + 
+`Cleaning.Fee`*`Guests.Included` + `Cleaning.Fee`*`Extra.People` + 
+`Cleaning.Fee`*`Minimum.Nights` + `Cleaning.Fee`*`Review.Scores.Rating` + 
+`Guests.Included`*`Extra.People` + `Guests.Included`*`Minimum.Nights` + 
+`Extra.People`*`Review.Scores.Rating` + `Minimum.Nights`*`Review.Scores.Rating` , data = airbnb.data)
+summary(new.airbnb.data.fit.inter)
+```
+
+
+```{r}
+new.airbnb.data.fit.inter.2 = lm(Price~.-Beds + `Host.Response.Rate`*`Host.Listings.Count`+ 
+`Host.Response.Rate`*`Room.Type` + `Host.Response.Rate`*`Guests.Included`+ 
+`Host.Listings.Count`*`Room.Type` + `Host.Listings.Count`*Bathrooms + 
+`Host.Listings.Count`*`Security.Deposit` + `Host.Listings.Count`*`Cleaning.Fee` + 
+`Host.Listings.Count`*`Extra.People` + Accommodates*Bathrooms + 
+Accommodates*`Security.Deposit` + Accommodates*`Cleaning.Fee` + Accommodates*`Extra.People` + 
+Bathrooms*`Security.Deposit` + Bathrooms*`Guests.Included` + Bathrooms*`Extra.People` + 
+Bathrooms*`Review.Scores.Rating` + `Cleaning.Fee`*`Extra.People` + `Cleaning.Fee`*`Minimum.Nights` + 
+`Cleaning.Fee`*`Review.Scores.Rating` + `Guests.Included`*`Extra.People` + 
+`Guests.Included`*`Minimum.Nights` + 
+`Extra.People`*`Review.Scores.Rating` + `Minimum.Nights`*`Review.Scores.Rating` , data = airbnb.data)
+summary(new.airbnb.data.fit.inter.2)
+```
+
+```{r}
+new.airbnb.data.fit.inter.3 = lm(Price~.-Beds + `Host.Response.Rate`*`Host.Listings.Count`+ 
+`Host.Response.Rate`*`Room.Type` + `Host.Response.Rate`*`Guests.Included`+ 
+`Host.Listings.Count`*`Room.Type` + `Host.Listings.Count`*Bathrooms + 
+`Host.Listings.Count`*`Security.Deposit` + `Host.Listings.Count`*`Cleaning.Fee` + 
+`Host.Listings.Count`*`Extra.People`  + Accommodates*`Security.Deposit` + 
+Accommodates*`Cleaning.Fee` + Accommodates*`Extra.People` + Bathrooms*`Security.Deposit` + 
+Bathrooms*`Extra.People` + Bathrooms*`Review.Scores.Rating` + `Cleaning.Fee`*`Extra.People` + 
+`Cleaning.Fee`*`Minimum.Nights` + `Cleaning.Fee`*`Review.Scores.Rating` + 
+`Guests.Included`*`Extra.People` + `Guests.Included`*`Minimum.Nights` + 
+`Extra.People`*`Review.Scores.Rating` + `Minimum.Nights`*`Review.Scores.Rating`, data = airbnb.data)
+summary(new.airbnb.data.fit.inter.3)
+```
+Hypothesis: \
+$H_0: \beta_i = 0$ \
+$H_a: \beta_i \neq 0$ (i = 1, 2,..., 13) \
+
+As indicated within the summary listed above, the test failed to reject the null hypothesis for all of the interacting terms. Therefore, no interaction terms were carried forward for further model development.
+
+After fitting interaction terms, and checking its statistical significance, the final interaction model has an $R^2_{adj}$ value of 0.5844, meaning that 58.44% of the variation of the price of an airbnb can be explained by the interaction model.
+
+
+## Checking Model Assumptions
+
+## Linearity Test
+
+
+To test the model for the linearity assumption, since the data consists of more than 5000 rows, we could not make use of a Shapiro - Wilks test, hence we would check for patterns in the residuals vs fitted plot.
+```{r}
+par(mfrow=c(1,1))
+plot(new.airbnb.data.fit.inter.3, which = 1)
+```
+
+## Checking the equal variance assumption
+
+To test for homoscedasticity, we would carry out a Breusch-Pagan test, and also check for patterns in the residuals vs fitted plot.
+
+$H_o$: heteroscedasticity is not present(homoscedasticity)  
+$H_{alpha}$: heteroscedasticity is present
+
+
+```{r}
+library(lmtest)
+bptest(new.airbnb.data.fit.inter.3)
+library(olsrr)
+ols_test_f(new.airbnb.data.fit.inter.3)
+
+ggplot(new.airbnb.data.fit.inter.3, aes(x=.fitted, y=.resid)) +geom_point()+
+  geom_hline(yintercept = 0) +geom_smooth()+
+  ggtitle("Residual plot: Residual vs Fitted values") 
+
+```
+From the result of the Breusch-Pagan test, since the p-value: 2.2e-16 < 0.05, and there appears to be a discernible pattern in the residuals vs fitted plot, we reject the null hypothesis, and conclude that heteroscedasticity is present in the model.
+
+
+## Checking the normality assumption 
+To test the normality assumtion for the initial first order model, a Q-Q plot was constructed and also, we cannot do Shapiro-test to chekcing the normality because our dataset is over 5000 rows.
+
+$H_o$: the sample data are significantly normally distributed  
+$H_{alpha}$: the sample data are not significantly normally distributed
+
+To check if the normality assumption met, a histogram of the residuals is plotted. Also, a q-q plot is also done.
+```{r}
+qplot(residuals(new.airbnb.data.fit.inter.3),
+      geom = "histogram",
+      binwidth = 1,
+      main = "Histogram of residual",
+      xlab = "residuals",color = "red",
+      fill = I("blue"))
+
+
+#Q-Q plot
+ggplot(airbnb.data,aes(sample = new.airbnb.data.fit.inter.3$residuals))+ 
+  stat_qq()+ stat_qq_line()
+```
+From the histogram of residuals plot above, the the histogram is bell shaped. Furthermore, majority of the points in the q-q plots falls on the line. Hence, we can conclude that the model is approximately normally distributed.
+
+## Check for outliers using the cook's distance.
+
+Cook's distance was calculated and plotted to determine if any values had a strong influence on the estimated coefficients. Initially, 0.5 was used as the limit for to indicate strong influence. 
+```{r}
+airbnb.data[cooks.distance(new.airbnb.data.fit.inter.3)>0.5,] #have Cook statistics larger than 0.1
+plot(new.airbnb.data.fit.inter.3,pch=18,col="red",which=c(4))
+```
+Based of a threshold of 0.5, we can conclude that there are no influential points in our dataset.
+
+## Model Transformation
+
+Since the best interaction model did not meet some of the necessary model assumptions, we would carry out a model transformation using the boxcox method.
+
+```{r}
+library(MASS)
+bc = boxcox(new.airbnb.data.fit.inter.3,lambda = seq(-2,2))
+```
+The best lambda which will be used in the model transformation is computed.
+
+```{r}
+bestlambda=bc$x[which(bc$y==max(bc$y))]
+bestlambda
+```
+
+A new linear model, which is a transformation of the best interaction model is fittd using the best lambda.
+```{r}
+bcmodel=lm((((Price^-0.06060606)-1)/-0.06060606) ~ .-Beds + `Host.Response.Rate`*`Host.Listings.Count`+ 
+`Host.Response.Rate`*`Room.Type` + `Host.Response.Rate`*`Guests.Included`+ 
+`Host.Listings.Count`*`Room.Type` + `Host.Listings.Count`*Bathrooms + 
+`Host.Listings.Count`*`Security.Deposit` + `Host.Listings.Count`*`Cleaning.Fee` + 
+`Host.Listings.Count`*`Extra.People`  + Accommodates*`Security.Deposit` + 
+Accommodates*`Cleaning.Fee` + Accommodates*`Extra.People` + Bathrooms*`Security.Deposit` + 
+Bathrooms*`Extra.People` + Bathrooms*`Review.Scores.Rating` + `Cleaning.Fee`*`Extra.People` + 
+`Cleaning.Fee`*`Minimum.Nights` + `Cleaning.Fee`*`Review.Scores.Rating` + 
+`Guests.Included`*`Extra.People` + `Guests.Included`*`Minimum.Nights` + 
+`Extra.People`*`Review.Scores.Rating` + `Minimum.Nights`*`Review.Scores.Rating` , data = airbnb.data)
+
+summary(bcmodel)
+```
+After transforming the model, the $R^2_{adj}$ value is 0.6384, meaning 63.84% of the variation of the price of an airbnb can be explained by the model. Finally, we would check if this transformed model would meet the required model assumptions.
+
+
+## Checking the Model Assumptions of the Transformed Model
+
+## Linearity Assumption
+
+To check if the linearity assumption is met, a residuals vs fitted graph is plotted.
+```{r}
+par(mfrow=c(1,1))
+plot(bcmodel, which = 1)
+```
+After conducting a box cox transformation on the model, no discernible pattern appears in the residual vs fitted plot. Indicating that the linearity assumption of the model is valid.
+
+
+## Equal Variance Assumption
+
+To check if the homoscedasticity assumption is met, a residuals vs fitted graph is plotted.
+
+$H_o$: heteroscedasticity is not present(homoscedasticity)  
+$H_{alpha}$: heteroscedasticity is present
+
+```{r}
+
+ggplot(bcmodel, aes(x=.fitted, y=.resid)) +geom_point()+
+  geom_hline(yintercept = 0) +geom_smooth()+
+  ggtitle("Residual plot: Residual vs Fitted values") 
+```
+After conducting a box cox transformation on the model, no discernible pattern appears in the residual vs fitted plot. Indicating that the homoscedasticity assumption of the model is valid.
+
+## Normality Assumption
+
+To check if the normality assumption met, a histogram of the residuals is plotted. Also, a q-q plot is also done.
+```{r}
+qplot(residuals(bcmodel),
+      geom = "histogram",
+      binwidth = 0.2,
+      main = "Histogram of residual",
+      xlab = "residuals",color = "red",
+      fill = I("blue"))
+
+
+#Q-Q plot
+ggplot(airbnb.data,aes(sample = bcmodel$residuals))+ 
+  stat_qq()+ stat_qq_line()
+
+```
+From the plot of the histogram and residuals, the bars form a bell shape indicating the model is approximately normally distributed. This is also supported by the normall Q_Q plot.
+
+
+
+After checking the linearity, homoscedasticity, normality assumption of the best interaction model, we discovered the model failed to satisfy all the model assumptions. Therefore, we conducted a box cox transformation on the model. The resulting model has an $R^2_{adj}$ value of 0.6384 Indicating 63.84% of the variation of the price of an airbnb can be explained by the model.
+
+
+
+## Summary of Final Model
+
+```{r}
+summary(bcmodel)
+```
+
+# Discussion and Conclusion
+
+After fitting the addictive model, the interaction model and boxcox transformation model, the $R^2_{adj}$ values are: 0.5643, 0.5844 and 0.6384 respectively. This indicates that the best model for predicting the price of an airbnb is the boxcox model, since its $R^2_{adj}$ value of 0.6384 explains 63.84% of the variation of the price of an airbnb, and it also adheres to the necessary model assumptions. Also the RMSE of the boxcox model is 0.2777, which is lower than that of the interaction model which is 75.43 
+
+Finally, after comparing the $R^2_{adj}$ values and the RMSE of the 3 models, we conclude that the boxcox model is the best for predicting the price of an airbnb.
+
